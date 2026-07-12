@@ -44,6 +44,7 @@
         function initForm() {
             dateEl.value =  new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo" }).format(new Date());
             githubTokenEl.value = localStorage.getItem(TOKEN_KEY) || "";
+            statusEl.textContent = "準備完了";
         }
 
         async function fetchReadme(token) {
@@ -86,6 +87,14 @@
             if (!result.ok) throw new Error("コミットに失敗しました。");
         }
 
+        function isDuplicateEntry(markdown, kanji, yomi) {
+            const lines = markdown.split("\n");
+            return lines.some((line) => {
+                const cells = line.split("|").map((cell) => cell.trim()).filter((cell) => cell !== "");
+                return cells.length === 3 && cells[0] === kanji && cells[1] === yomi;
+            });
+        }
+
         function readEntryForm() {
             return {
                 token: githubTokenEl.value.trim(),
@@ -109,13 +118,24 @@
                 return;
             }
 
-            if (!confirm("追加しますか？")) return;
-
-            localStorage.setItem(TOKEN_KEY, token);
-            statusEl.textContent = "登録中...";
+            statusEl.textContent = "確認中...";
 
             try {
                 const { sha, markdown } = await fetchReadme(token);
+
+                if (isDuplicateEntry(markdown, kanji, yomi)) {
+                    statusEl.textContent = "既に同じ組み合わせの漢字と読みが登録されています。";
+                    return;
+                }
+
+                if (!confirm("登録しますか？")) {
+                    statusEl.textContent = "登録を中止しました。";
+                    return;
+                }
+
+                localStorage.setItem(TOKEN_KEY, token);
+                statusEl.textContent = "登録中...";
+
                 const updated = appendRow(markdown, { kanji, yomi, date });
                 await commitReadme(token, updated, sha, `[kanji-log-app] Add ${kanji} (${yomi})`);
 
