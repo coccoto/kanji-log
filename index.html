@@ -1,0 +1,133 @@
+<html>
+<head>
+    <title>kanji-log-app</title>
+    <script src="https://cdn.jsdelivr.net/npm/js-base64@3.8.1/base64.min.js"></script>
+    <style>
+        body {
+            max-width: 320px;
+            margin: 1rem auto;
+        }
+        .form {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        input, button {
+            padding: 0.5rem;
+        }
+        output {
+            font-size: 0.8rem;
+        }
+    </style>
+</head>
+<body>
+    <form id="entryForm" class="form">
+        <input id="githubToken" type="password" placeholder="GitHub Token">
+        <input id="kanji" type="text" placeholder="漢字">
+        <input id="yomi" type="text" placeholder="読み">
+        <input id="date" type="date">
+        <button type="submit">追加</button>
+        <output id="status"></output>
+    </form>
+
+    <script>
+        const API_URL = "https://api.github.com/repos/coccoto/kanji-log/contents/README.md";
+        const TOKEN_KEY = "kanji_log_pat";
+
+        const entryFormEl = document.getElementById("entryForm");
+        const githubTokenEl = document.getElementById("githubToken");
+        const kanjiEl = document.getElementById("kanji");
+        const yomiEl = document.getElementById("yomi");
+        const dateEl = document.getElementById("date");
+        const statusEl = document.getElementById("status");
+
+        function initForm() {
+            dateEl.value =  new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo" }).format(new Date());
+            githubTokenEl.value = localStorage.getItem(TOKEN_KEY) || "";
+        }
+
+        async function fetchReadme(token) {
+            const result = await fetch(API_URL, {
+                headers: { Authorization: `token ${token}` },
+            });
+            if (!result.ok) throw new Error("README.md の取得に失敗しました。");
+
+            const file = await result.json();
+            return { sha: file.sha, markdown: Base64.decode(file.content) };
+        }
+
+        function appendRow(markdown, { kanji, yomi, date }) {
+            const lines = markdown.split("\n");
+            const headerIndex = lines.findIndex((line) => line.trim().startsWith("| 漢字 | 読み | 登録日 |"));
+            if (headerIndex === -1) throw new Error("テーブルが見つかりません。");
+
+            let insertIndex = headerIndex + 2;
+            while (insertIndex < lines.length && lines[insertIndex].trim().startsWith("|")) {
+                insertIndex ++;
+            }
+
+            lines.splice(insertIndex, 0, `| ${kanji} | ${yomi} | ${date} |`);
+            return lines.join("\n");
+        }
+
+        async function commitReadme(token, markdown, sha, message) {
+            const result = await fetch(API_URL, {
+                method: "PUT",
+                headers: {
+                    Authorization: `token ${token}`,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    message,
+                    content: Base64.encode(markdown),
+                    sha,
+                }),
+            });
+            if (!result.ok) throw new Error("コミットに失敗しました。");
+        }
+
+        function readEntryForm() {
+            return {
+                token: githubTokenEl.value.trim(),
+                kanji: kanjiEl.value.trim(),
+                yomi: yomiEl.value.trim(),
+                date: dateEl.value,
+            };
+        }
+
+        function clearEntryInputs() {
+            kanjiEl.value = "";
+            yomiEl.value = "";
+        }
+
+        async function handleSubmit(event) {
+            event.preventDefault();
+
+            const { token, kanji, yomi, date } = readEntryForm();
+            if (!token || !kanji || !yomi || !date) {
+                statusEl.textContent = "全ての項目を入力してください。";
+                return;
+            }
+
+            if (!confirm("追加しますか？")) return;
+
+            localStorage.setItem(TOKEN_KEY, token);
+            statusEl.textContent = "登録中...";
+
+            try {
+                const { sha, markdown } = await fetchReadme(token);
+                const updated = appendRow(markdown, { kanji, yomi, date });
+                await commitReadme(token, updated, sha, `[kanji-log-app] Add ${kanji} (${yomi})`);
+
+                statusEl.textContent = "登録が完了しました。";
+                clearEntryInputs();
+            } catch (error) {
+                statusEl.textContent = error.message;
+            }
+        }
+
+        entryFormEl.addEventListener("submit", handleSubmit);
+        initForm();
+    </script>
+</body>
+</html>
